@@ -4,6 +4,7 @@ from model import unet
 import os
 import scipy.io as sio
 import configparser
+import psutil
 
 #Saves validation slices to MAT files
 def save_to_MAT(sess, network, X, clean_X, mask, F, path, epoch, val_tracking):
@@ -161,11 +162,11 @@ def train_net(train_X, train_clean_X, train_mask, train_F, val_X, val_clean_X, v
             writer.add_summary(l2_train_summ, epoch)
             writer.add_summary(l2_val_summ, epoch)
 
-            if epoch % save_model_epoch == 0: #Saves the model
+            if epoch % save_mat_epoch == 0: #Saves the model
                 print("Saving Validation Tracking to MAT")
                 save_to_MAT(sess, UNET, val_X, val_clean_X, val_mask, val_F, MAT_path, epoch,val_tracking)
 
-            if epoch % save_mat_epoch == 0: #Saves mat results of validation data
+            if epoch % save_model_epoch == 0: #Saves mat results of validation data
                 save_model_epoch_path = save_model_path + str(epoch) + "/"
                 os.makedirs(save_model_epoch_path)
                 save_path = saver.save(sess,save_model_epoch_path + "myModel.ckpt")
@@ -191,6 +192,8 @@ def prepare_noisy_data(inds, config):
 
     insert_at_ind = 0
     for patient in sorted(inds): #Goes through each patient
+        print("Patient: " + str(patient))
+
         standard_echo = int(config["data"]["standardize_denoise"])
 
         if standard_echo == 0:
@@ -254,25 +257,32 @@ def prepare_noisy_data(inds, config):
         input_F_list.append(four_F)
         input_noise_x_list.append(four_noise_X)
 
-        # Converts Giant List Into NumPy
-        numSlices = 0
-        for i in range(len(input_clean_x_list)):
-            print(i)
-            numSlices += input_clean_x_list[i].shape[0]
+    # Converts Giant List Into NumPy
+    numSlices = 0
+    for i in range(len(input_clean_x_list)):
+        print(i)
+        numSlices += input_clean_x_list[i].shape[0]
 
-        input_clean_X = np.zeros((numSlices, y_dim, x_dim, echos))  # Empty Arrays To Be Filled
-        input_noise_X = np.zeros((numSlices, y_dim, x_dim, echos))  # Empty Arrays To Be Filled
-        input_mask = np.zeros((numSlices, y_dim, x_dim, 1))
-        input_F = np.zeros((numSlices, y_dim, x_dim, echos))
+    input_clean_X = np.zeros((numSlices, y_dim, x_dim, echos))  # Empty Arrays To Be Filled
+    input_noise_X = np.zeros((numSlices, y_dim, x_dim, echos))  # Empty Arrays To Be Filled
+    input_mask = np.zeros((numSlices, y_dim, x_dim, 1))
+    input_F = np.zeros((numSlices, y_dim, x_dim, echos))
 
-        insert_at_ind = 0
-        for i in range(len(input_clean_x_list)):
-            numSlicesGenerated = input_clean_x_list[i].shape[0]
-            input_clean_X[insert_at_ind:insert_at_ind + numSlicesGenerated] = input_clean_x_list[i]
-            input_noise_X[insert_at_ind:insert_at_ind + numSlicesGenerated] = input_noise_x_list[i]
-            input_mask[insert_at_ind:insert_at_ind + numSlicesGenerated] = input_mask_list[i]
-            input_F[insert_at_ind:insert_at_ind + numSlicesGenerated] = input_F_list[i]
-            insert_at_ind += numSlicesGenerated
+    insert_at_ind = 0
+
+    for i in range(len(input_clean_x_list)):
+        print(i)
+        numSlicesGenerated = input_clean_x_list[i].shape[0]
+        input_clean_X[insert_at_ind:insert_at_ind + numSlicesGenerated] = input_clean_x_list[i]
+        input_noise_X[insert_at_ind:insert_at_ind + numSlicesGenerated] = input_noise_x_list[i]
+        input_mask[insert_at_ind:insert_at_ind + numSlicesGenerated] = input_mask_list[i]
+        input_F[insert_at_ind:insert_at_ind + numSlicesGenerated] = input_F_list[i]
+        insert_at_ind += numSlicesGenerated
+
+        input_clean_x_list[i] = None
+        input_noise_x_list[i] = None
+        input_mask_list[i] = None
+        input_F_list[i] = None
 
     input_noise_x_list = None
     input_mask_list = None
@@ -350,6 +360,10 @@ def grab_data(inds,config):
         input_F[insert_at_ind:insert_at_ind + numSlicesGenerated] = input_F_list[i]
         insert_at_ind += numSlicesGenerated
 
+        input_x_list[i]= None
+        input_mask_list[i] = None
+        input_F_list[i] = None
+
     input_x_list = None
     input_mask_list = None
     input_F_list = None
@@ -361,18 +375,22 @@ def grab_data(inds,config):
 def load_data(train_pts, val_pts, config):
 
     #If denoising add noise to data used in optimization
-    if bool(config["data"]["denoise"]):
+    if config["data"]["denoise"].lower() == "true":
+        print("Getting noisy data")
         val_X, val_clean_X, val_mask, val_F = prepare_noisy_data(val_pts, config)
     else:
+        print("getting Clean data")
         val_X, val_clean_X, val_mask, val_F = grab_data(val_pts, config)
 
     val_mask = np.squeeze(val_mask, axis=3)  # (#pts, y, x)
     val_clean_X = np.multiply(val_clean_X, val_mask[:, :, :, None])
     val_mask = np.expand_dims(val_mask, axis=3)  # (tp, y, x, 1)
 
-    if bool(config["data"]["denoise"]):
+    if config["data"]["denoise"].lower() == "true":
+        print("Getting noisy data")
         train_X, train_clean_X, train_mask, train_F = prepare_noisy_data(train_pts,config)
     else:
+        print("getting Clean data")
         train_X, train_clean_X, train_mask, train_F = grab_data(train_pts, config)
 
     train_mask = np.squeeze(train_mask, axis=3)  # (tp, y, x)
@@ -442,7 +460,7 @@ train_X, train_clean_X, train_mask, train_F, val_X, val_clean_X, val_mask, val_F
 
 #Create paths for saving model, logs and validation points
 # Create All Paths To Be Used
-path = config["save_params"]["save_path"] + config["global"]["experiment_name"] + "/"  # Makes little fodlder for everything we want :)
+path = config["save_params"]["save_path"] + config["global"]["experiment_name"] + "/"
 save_model_path = path + "saved_models" + "/"
 log_path = path + "logs/"
 MAT_path = path + "MAT/"
