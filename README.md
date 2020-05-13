@@ -4,7 +4,7 @@
 This code was written using:
 
 1. python 3.6.3 Anaconda
-2. tenserflow-gpu 1.13.1
+2. tensorflow-gpu 1.13.1
 3. numpy 1.16.4
 4. cudnn 7.6.0
 5. cudatoolkit 9.0
